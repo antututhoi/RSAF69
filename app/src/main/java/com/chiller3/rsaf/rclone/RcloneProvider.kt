@@ -804,7 +804,14 @@ class RcloneProvider : DocumentsProvider(), SharedPreferences.OnSharedPreference
             return null
         }
 
-        val projection = arrayOf(DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            // 69: used for the thumbnail cache key
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        )
+        var fileSize = 0L
+        var modTime = 0L
         val mimeType = queryDocument(documentId, projection).use { cursor ->
             if (!cursor.moveToFirst()) {
                 // Should never happen.
@@ -812,6 +819,8 @@ class RcloneProvider : DocumentsProvider(), SharedPreferences.OnSharedPreference
             }
 
             val index = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            fileSize = cursor.getLong(cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE))
+            modTime = cursor.getLong(cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_LAST_MODIFIED))
             cursor.getString(index)
         }
 
@@ -820,13 +829,24 @@ class RcloneProvider : DocumentsProvider(), SharedPreferences.OnSharedPreference
             return null
         }
 
+        // 69: thumbnails are kept on the phone, so a folder only has to make them once.
+        val cacheFile = Mod69ThumbCache.file(context!!, documentId, fileSize, modTime, sizeHint)
+        if (cacheFile.length() > 0) {
+            debugLog("Thumbnail from cache: $documentId")
+            return AssetFileDescriptor(
+                ParcelFileDescriptor.open(cacheFile, ParcelFileDescriptor.MODE_READ_ONLY),
+                0,
+                AssetFileDescriptor.UNKNOWN_LENGTH,
+            )
+        }
+
         val mediaInput = openDocument(documentId, "r", signal)
 
         try {
             val pipe = ParcelFileDescriptor.createReliablePipe()
 
             // The task owns both file descriptors.
-            val task = ThumbnailTask(documentId, mediaInput, pipe[1], mimeType, sizeHint, signal)
+            val task = ThumbnailTask(documentId, mediaInput, pipe[1], mimeType, sizeHint, signal, cacheFile)
 
             thumbnailTaskPool.submit(task)
 
@@ -1309,6 +1329,8 @@ class RcloneProvider : DocumentsProvider(), SharedPreferences.OnSharedPreference
         private val mimeType: String,
         private val sizeHint: Point,
         private val signal: CancellationSignal?,
+        // 69: where the finished thumbnail is kept for next time
+        private val cacheFile: java.io.File? = null,
     ) : Runnable {
         override fun run() {
             debugLog("ThumbnailTask[$documentId].run()")
@@ -1333,7 +1355,12 @@ class RcloneProvider : DocumentsProvider(), SharedPreferences.OnSharedPreference
                         try {
                             signal?.throwIfCanceled()
 
-                            bitmap.compress(Bitmap.CompressFormat.PNG, 0, output)
+                            // 69: write it once, then send it and keep a copy in the cache
+                            val bytes = java.io.ByteArrayOutputStream()
+                            bitmap.compress(Bitmap.CompressFormat.PNG, 0, bytes)
+                            val data = bytes.toByteArray()
+                            if (cacheFile != null) Mod69ThumbCache.save(cacheFile, data)
+                            output.write(data)
                         } finally {
                             bitmap.recycle()
                         }

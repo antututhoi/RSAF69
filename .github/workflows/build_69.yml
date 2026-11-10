@@ -1,0 +1,62 @@
+name: Build 69-RSAF
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - uses: actions/setup-go@v5
+        with:
+          cache-dependency-path: rcbridge/go.sum
+          go-version-file: rcbridge/go.mod
+
+      - name: Install NDK
+        run: |
+          NDK=$(sed -nr 's/^\s*ndkVersion\s*=\s*"(.+)".*$/\1/p' app/build.gradle.kts)
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK" > /dev/null
+
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "RELEASE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build
+        env:
+          RELEASE_KEYSTORE_PASSPHRASE: ytdlnis123
+          RELEASE_KEY_ALIAS: key0
+          RELEASE_KEY_PASSPHRASE: ytdlnis123
+        run: ./gradlew --no-daemon assembleRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 69-rsaf-apk
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Publish on the Releases page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete rsaf69-latest --yes --cleanup-tag || true
+          gh release create rsaf69-latest app/build/outputs/apk/release/*.apk \
+            --target "$GITHUB_SHA" --prerelease --title "69-RSAF build #${{ github.run_number }}" \
+            --notes "Video thumbnails made from 3 s in, kept on the phone (cache)."

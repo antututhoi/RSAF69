@@ -127,7 +127,8 @@ val goDir = File(rootDir, "external/go")
 val goSrcDir = File(goDir, "src")
 val goBinDir = File(goDir, "bin")
 
-val abis = arrayOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+// 69: arm64 only
+val abis = arrayOf("arm64-v8a")
 
 val isWindows = DefaultNativePlatform.getCurrentOperatingSystem().isWindows
 val exeExt = if (isWindows) ".exe" else ""
@@ -140,10 +141,12 @@ android {
     ndkVersion = "30.0.16248370"
 
     defaultConfig {
-        applicationId = "com.chiller3.rsaf"
+        // 69: own app id so it installs next to the original RSAF
+        applicationId = "com.chiller3.rsaf.mod69"
         minSdk = 28
         targetSdk = 37
-        versionCode = gitVersionCode
+        // 69: rises with every GitHub build
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.let { it * 10 } ?: gitVersionCode
         versionName = gitVersionName
 
         base.archivesName.set("RSAF-$versionName")

@@ -249,7 +249,7 @@ object Thumbnailer {
 
     /**
      * Get the embedded thumbnail from a video file. If the file does not have one, then a thumbnail
-     * is created from the closest keyframe at the half point of the video.
+     * is created from the closest keyframe 3 seconds in (69 mod; it was the half point).
      */
     private fun createVideoThumbnail(
         fd: FileDescriptor,
@@ -280,7 +280,9 @@ object Thumbnailer {
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLong() ?: throw IOException("Failed to get video duration")
 
-            val thumbnailUs = durationMs * 1000 / 2
+            // 69: take the frame near the start (3 s in, or 1/10 of very short videos) instead of
+            // the middle, so a cloud file only needs its first few MB downloaded.
+            val thumbnailUs = minOf(3_000_000L, durationMs * 1000 / 10)
             val option = MediaMetadataRetriever.OPTION_CLOSEST_SYNC
 
             signal?.throwIfCanceled()
